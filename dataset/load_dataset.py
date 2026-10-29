@@ -11,6 +11,7 @@ from urllib.request import urlretrieve
 import zipfile
 
 import anndata as ad
+import numpy as np
 import pandas as pd
 from scipy import io, sparse
 
@@ -246,7 +247,9 @@ def _discover(folder):
     return samples
 
 
-def load_dataset(dataset_name="seu-3d"):
+def load_dataset(dataset_name="seu-3d", output="anndata"):
+    if output not in ("anndata", "arrays"):
+        raise ValueError("output must be 'anndata' or 'arrays'")
     name = _resolve_name(dataset_name)
     folder = DATA_DIR / ("GSE278603_RAW" if name == "seu-3d" else name)
     if name == "seu-3d" and not folder.exists() and (ROOT / "GSE278603_RAW").exists():
@@ -277,12 +280,19 @@ def load_dataset(dataset_name="seu-3d"):
             "orientation (cells_by_genes or genes_by_cells), and obs/var metadata paths. "
             "Raw reads and images require upstream processing."
         )
-    return {sample: _read_sample(folder, spec) for sample, spec in samples.items()}
+    datasets = {}
+    for sample, spec in samples.items():
+        adata = _read_sample(folder, spec)
+        if output == "arrays":
+            datasets[sample] = adata.X.toarray() if sparse.issparse(adata.X) else np.asarray(adata.X)
+        else:
+            datasets[sample] = adata
+    return datasets
 
 
 if __name__ == "__main__":
     parser = argparse.ArgumentParser(
-        description="Load a named Datasets.md entry as a dictionary of sample AnnData objects.",
+        description="Load a named Datasets.md entry as a dictionary of sample AnnData objects or NumPy arrays.",
         epilog='Files live in dataset/data/<name> (SEU-3D uses GSE278603_RAW). '
         'Automatic downloads: seu-3d, spateo, extended-mouse-atlas. Other entries need local '
         'processed files or dataset.json downloads. For custom matrices, dataset.json contains '
@@ -293,6 +303,10 @@ if __name__ == "__main__":
         'zellkonverter, and Seurat for Seurat objects.',
     )
     parser.add_argument("dataset_name", nargs="?", default="seu-3d")
+    parser.add_argument(
+        "--output", choices=("anndata", "arrays"), default="anndata",
+        help="Output type; arrays returns dense cells-by-genes X values without metadata",
+    )
     parser.add_argument("--list", action="store_true", help="List catalog names and entry numbers")
     args = parser.parse_args()
     if args.list:
@@ -300,7 +314,7 @@ if __name__ == "__main__":
         for number, name in enumerate(DATASET_NAMES, 1):
             print(f"{number:2}  {name:30} {catalog[number]['title']}")
     else:
-        datasets = load_dataset(args.dataset_name)
+        datasets = load_dataset(args.dataset_name, output=args.output)
         for name, adata in datasets.items():
             print(name)
             print(adata)
